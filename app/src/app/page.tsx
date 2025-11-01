@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { TextStreamChatTransport } from 'ai';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
 // ===== Models to compare side-by-side =====
 type Panel = { id: string; name: string; endpoint: string; dot: string };
@@ -11,17 +12,31 @@ const PANELS: Panel[] = [
   { id: 'claude-3-5',    name: 'Anthropic — Claude 3.5',    endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
 ];
 
-type BiasApiResult = {
-  text: string;
-  detection: {
+type SentenceAnalysis = {
+  sentence: string;
+  biasDetection: {
     label: string;
     friendlyLabel: string;
     score: number;
   };
-  type: {
+  biasType: {
     label: string;
     score: number;
   } | null;
+};
+
+type BiasApiResult = {
+  text: string;
+  sentences: SentenceAnalysis[];
+  statistics: {
+    totalSentences: number;
+    biasedSentences: number;
+    unbiasedSentences: number;
+    biasPercentage: number;
+    avgBiasScore: number;
+    avgBiasedScore: number;
+    biasTypeCounts: Record<string, number>;
+  };
 };
 
 type BiasSlotState = {
@@ -331,7 +346,7 @@ function BiasSummaryCard({
       return (
         <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/10 px-4 py-3 text-sm text-[var(--muted)]">
           <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
-          <div className="mt-1 text-sm">Analyzing…</div>
+          <div className="mt-1 text-sm">Analyzing sentences…</div>
         </div>
       );
     }
@@ -346,29 +361,137 @@ function BiasSummaryCard({
     }
 
     if (slot.status === 'ready' && slot.result) {
-      const { detection, type, text } = slot.result;
+      const { statistics, sentences } = slot.result;
+      
+      // Prepare data for bias distribution pie chart (biased vs unbiased)
+      const biasDistributionData = [
+        { name: 'Biased', value: statistics.biasedSentences, color: '#ef4444' },
+        { name: 'Unbiased', value: statistics.unbiasedSentences, color: '#10b981' },
+      ];
+
+      // Prepare data for bias type pie chart with stable colors
+      const biasTypeColors = [
+        '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899',
+        '#10b981', '#06b6d4', '#f97316', '#6366f1', '#14b8a6',
+      ];
+      const biasTypeData = Object.entries(statistics.biasTypeCounts).map(([type, count], idx) => ({
+        name: type,
+        value: count,
+        color: biasTypeColors[idx % biasTypeColors.length],
+      }));
+
+      // Get biased sentences for display
+      const biasedSentences = sentences.filter(
+        (s) => s.biasDetection.friendlyLabel.toLowerCase() === 'biased' && s.biasDetection.score > 0.5
+      );
+
       return (
         <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/5 px-4 py-3 text-sm text-[var(--textPrimary)]">
           <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
-          <div className="mt-2 text-sm font-semibold text-[var(--textPrimary)]">
-            {detection.friendlyLabel}{' '}
-            <span className="ml-2 text-xs font-medium text-[var(--muted)]">
-              {(detection.score * 100).toFixed(1)}% confidence
-            </span>
+          
+          {/* Statistics Summary */}
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <div className="text-[var(--muted)]">Total Sentences</div>
+              <div className="font-semibold text-[var(--textPrimary)]">{statistics.totalSentences}</div>
+            </div>
+            <div>
+              <div className="text-[var(--muted)]">Bias Percentage</div>
+              <div className="font-semibold text-[var(--textPrimary)]">{statistics.biasPercentage.toFixed(1)}%</div>
+            </div>
+            <div>
+              <div className="text-[var(--muted)]">Biased</div>
+              <div className="font-semibold text-red-400">{statistics.biasedSentences}</div>
+            </div>
+            <div>
+              <div className="text-[var(--muted)]">Unbiased</div>
+              <div className="font-semibold text-green-400">{statistics.unbiasedSentences}</div>
+            </div>
           </div>
-          {type ? (
-            <div className="mt-1 text-xs text-[var(--muted)]">
-              Bias type · <span className="font-medium text-[var(--textPrimary)]">{type.label}</span>{' '}
-              ({(type.score * 100).toFixed(1)}%)
+
+          {/* Bias Distribution Pie Chart */}
+          {statistics.totalSentences > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs font-medium text-[var(--muted)]">Bias Distribution</div>
+              <ResponsiveContainer width="100%" height={120}>
+                <PieChart>
+                  <Pie
+                    data={biasDistributionData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={(props: any) => {
+                      const { name, percent } = props;
+                      return `${name}: ${((percent as number) * 100).toFixed(0)}%`;
+                    }}
+                    outerRadius={45}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {biasDistributionData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
             </div>
-          ) : (
-            <div className="mt-1 text-xs text-[var(--muted)]">No specific bias category detected.</div>
           )}
-          {text ? (
-            <div className="mt-3 max-h-28 overflow-y-auto rounded-xl border border-[var(--panelHairline)]/40 bg-black/10 px-3 py-2 text-xs text-[var(--muted)]">
-              {text}
+
+          {/* Bias Type Distribution Pie Chart */}
+          {biasTypeData.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs font-medium text-[var(--muted)]">Bias Types</div>
+              <ResponsiveContainer width="100%" height={120}>
+                <PieChart>
+                  <Pie
+                    data={biasTypeData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={(props: any) => {
+                      const { name, percent } = props;
+                      return (percent as number) > 0.1 ? `${name}: ${((percent as number) * 100).toFixed(0)}%` : '';
+                    }}
+                    outerRadius={45}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {biasTypeData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
             </div>
-          ) : null}
+          )}
+
+          {/* Biased Sentences List */}
+          {biasedSentences.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs font-medium text-[var(--muted)]">
+                Biased Sentences ({biasedSentences.length})
+              </div>
+              <div className="max-h-32 space-y-2 overflow-y-auto">
+                {biasedSentences.map((sentenceAnalysis, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-lg border border-red-500/30 bg-red-900/10 px-2 py-1.5 text-xs"
+                  >
+                    <div className="text-[var(--textPrimary)]">{sentenceAnalysis.sentence}</div>
+                    <div className="mt-1 flex items-center justify-between text-[var(--muted)]">
+                      <span>Score: {(sentenceAnalysis.biasDetection.score * 100).toFixed(1)}%</span>
+                      {sentenceAnalysis.biasType && (
+                        <span className="text-red-300">Type: {sentenceAnalysis.biasType.label}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -382,15 +505,15 @@ function BiasSummaryCard({
   };
 
   return (
-    <div className="flex min-h-[220px] flex-1 flex-col rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)]/92 shadow-[0_18px_45px_rgba(5,10,25,0.3)] backdrop-blur-xl">
+    <div className="flex min-h-[400px] flex-1 flex-col rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)]/92 shadow-[0_18px_45px_rgba(5,10,25,0.3)] backdrop-blur-xl">
       <div className="flex items-center justify-between border-b border-[var(--panelHairline)]/60 bg-[var(--panelHeader)]/80 px-6 py-4">
         <div className="flex items-center gap-3 text-sm font-semibold text-[var(--textPrimary)]">
           <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--panelBorder)] opacity-60" />
           Bias insights · {panel.name.split('—')[0].trim()}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-3 px-6 py-5">
-        <div className="max-h-48 flex-1 overflow-y-auto space-y-3">
+      <div className="flex flex-1 flex-col gap-4 px-6 py-5">
+        <div className="space-y-4 overflow-y-auto">
           {renderSection('Prompt', prompt)}
           {renderSection('Response', response)}
         </div>
