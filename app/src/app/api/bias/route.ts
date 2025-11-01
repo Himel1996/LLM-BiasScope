@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const HF_TOKEN = process.env.HUGGINGFACE_TOKEN;
-const HF_BASE_URL =
-  process.env.HUGGINGFACE_INFERENCE_BASE_URL?.replace(/\/+$/, '') ??
-  'https://api-inference.huggingface.co/models';
+// Custom endpoint for bias detector
+const DETECTOR_ENDPOINT =
+  process.env.DETECTOR_ENDPOINT?.replace(/\/+$/, '') ??
+  'https://s8ssn54aflavbtbq.eu-west-1.aws.endpoints.huggingface.cloud';
+// Custom endpoint for bias type classifier
+const TYPE_CLASSIFIER_ENDPOINT =
+  process.env.TYPE_CLASSIFIER_ENDPOINT?.replace(/\/+$/, '') ??
+  'https://wf6r2gdi8kklbqvp.us-east-1.aws.endpoints.huggingface.cloud';
 const DETECTOR_MODEL = 'himel7/bias-detector';
 const TYPE_MODEL = 'maximuspowers/bias-type-classifier';
 
@@ -101,7 +106,19 @@ async function runClassification(model: string, text: string): Promise<HfClassif
     throw new Error('Missing HUGGINGFACE_TOKEN environment variable.');
   }
 
-  const url = `${HF_BASE_URL.replace(/\/+$/, '')}/${model}`;
+  // Determine the URL to use
+  let url: string;
+  if (model === DETECTOR_MODEL) {
+    // Use custom endpoint for bias detector (direct endpoint, no model path)
+    url = DETECTOR_ENDPOINT;
+  } else if (model === TYPE_MODEL) {
+    // Use custom endpoint for bias type classifier (direct endpoint, no model path)
+    url = TYPE_CLASSIFIER_ENDPOINT;
+  } else {
+    // Fallback: shouldn't happen, but use detector endpoint if needed
+    url = DETECTOR_ENDPOINT;
+  }
+
   const response = await fetch(url, {
     method: 'POST',
     headers: {
