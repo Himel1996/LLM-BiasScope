@@ -11,6 +11,31 @@ const PANELS: Panel[] = [
   { id: 'claude-3-5',    name: 'Anthropic — Claude 3.5',    endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
 ];
 
+type BiasApiResult = {
+  text: string;
+  detection: {
+    label: string;
+    friendlyLabel: string;
+    score: number;
+  };
+  type: {
+    label: string;
+    score: number;
+  } | null;
+};
+
+type BiasSlotState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  text?: string;
+  result?: BiasApiResult;
+  error?: string;
+};
+
+type BiasColumnState = {
+  prompt: BiasSlotState;
+  response: BiasSlotState;
+};
+
 // ===== Chat history (local) =====
 type ChatMeta = { id: string; title: string; createdAt: number };
 const LS_KEY = 'biascope_chats_v1';
@@ -71,6 +96,13 @@ function useChatHistory() {
   return { chats, addChat, renameChat, removeChat, hydrated };
 }
 
+const getTextFromParts = (parts: { type: string; text?: string }[]) =>
+  parts
+    .filter((p) => p.type === 'text' && p.text)
+    .map((p) => p.text!.trim())
+    .join('\n')
+    .trim();
+
 // ===== Message bubble =====
 function MessageBubble({
   role,
@@ -79,7 +111,7 @@ function MessageBubble({
   role: 'user' | 'assistant' | 'system';
   parts: { type: string; text?: string }[];
 }) {
-  const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
+  const text = getTextFromParts(parts);
   const isUser = role === 'user';
   const isAssistant = role === 'assistant';
   return (
@@ -97,11 +129,13 @@ function ChatColumn({
   chatId,
   sharedPrompt,
   onFirstUserMessage,
+  onBiasUpdate,
 }: {
   panel: Panel;
   chatId: string;
   sharedPrompt: string;
   onFirstUserMessage: (text: string) => void;
+  onBiasUpdate: (panelId: string, state: BiasColumnState) => void;
 }) {
   // give each column a stable id bound to chatId so history separates per chat
   const { messages, sendMessage, status, error, stop } = useChat({
@@ -111,12 +145,96 @@ function ChatColumn({
 
   const [localInput, setLocalInput] = useState('');
   const firstUserSent = useRef(false);
+  const [biasState, setBiasState] = useState<BiasColumnState>({
+    prompt: { status: 'idle' },
+    response: { status: 'idle' },
+  });
+  const lastAnalyzedText = useRef<{ prompt: string; response: string }>({
+    prompt: '',
+    response: '',
+  });
+
+  const analyzeText = useCallback(async (text: string): Promise<BiasApiResult> => {
+    const response = await fetch('/api/bias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'Bias analysis failed');
+    }
+    return payload as BiasApiResult;
+  }, []);
+
+  const runBias = useCallback(
+    async (slot: 'prompt' | 'response', text: string) => {
+      setBiasState((prev) => ({
+        ...prev,
+        [slot]: { status: 'loading', text },
+      }));
+      try {
+        const result = await analyzeText(text);
+        setBiasState((prev) => ({
+          ...prev,
+          [slot]: { status: 'ready', text, result },
+        }));
+      } catch (err) {
+        setBiasState((prev) => ({
+          ...prev,
+          [slot]: {
+            status: 'error',
+            text,
+            error: err instanceof Error ? err.message : 'Unexpected error',
+          },
+        }));
+      }
+    },
+    [analyzeText]
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, status]);
+
+  useEffect(() => {
+    if (!messages.length) return;
+
+    const latestUser = [...messages]
+      .slice()
+      .reverse()
+      .find((msg) => msg.role === 'user');
+    if (latestUser) {
+      const text = getTextFromParts(latestUser.parts);
+      if (text && text !== lastAnalyzedText.current.prompt) {
+        lastAnalyzedText.current.prompt = text;
+        runBias('prompt', text);
+      }
+    }
+
+    const latestAssistant = [...messages]
+      .slice()
+      .reverse()
+      .find((msg) => msg.role === 'assistant');
+    if (latestAssistant && status !== 'streaming') {
+      const text = getTextFromParts(latestAssistant.parts);
+      if (text && text !== lastAnalyzedText.current.response) {
+        lastAnalyzedText.current.response = text;
+        runBias('response', text);
+      }
+    }
+  }, [messages, runBias, status]);
+
+  useEffect(() => {
+    onBiasUpdate(panel.id, biasState);
+  }, [biasState, onBiasUpdate, panel.id]);
+
+  useEffect(() => {
+    setBiasState({ prompt: { status: 'idle' }, response: { status: 'idle' } });
+    lastAnalyzedText.current = { prompt: '', response: '' };
+  }, [chatId, panel.id]);
 
   const send = async (text: string) => {
     if (!text.trim()) return;
@@ -198,13 +316,101 @@ function ChatColumn({
   );
 }
 
+function BiasSummaryCard({
+  panel,
+  analysis,
+}: {
+  panel: Panel;
+  analysis?: BiasColumnState;
+}) {
+  const prompt: BiasSlotState = analysis?.prompt ?? { status: 'idle' };
+  const response: BiasSlotState = analysis?.response ?? { status: 'idle' };
+
+  const renderSection = (label: string, slot: BiasSlotState) => {
+    if (slot.status === 'loading') {
+      return (
+        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/10 px-4 py-3 text-sm text-[var(--muted)]">
+          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
+          <div className="mt-1 text-sm">Analyzing…</div>
+        </div>
+      );
+    }
+
+    if (slot.status === 'error' && slot.error) {
+      return (
+        <div className="rounded-2xl border border-red-500/40 bg-red-900/10 px-4 py-3 text-sm text-red-200">
+          <div className="text-xs uppercase tracking-wider text-red-200/80">{label}</div>
+          <div className="mt-1">{slot.error}</div>
+        </div>
+      );
+    }
+
+    if (slot.status === 'ready' && slot.result) {
+      const { detection, type, text } = slot.result;
+      return (
+        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/5 px-4 py-3 text-sm text-[var(--textPrimary)]">
+          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
+          <div className="mt-2 text-sm font-semibold text-[var(--textPrimary)]">
+            {detection.friendlyLabel}{' '}
+            <span className="ml-2 text-xs font-medium text-[var(--muted)]">
+              {(detection.score * 100).toFixed(1)}% confidence
+            </span>
+          </div>
+          {type ? (
+            <div className="mt-1 text-xs text-[var(--muted)]">
+              Bias type · <span className="font-medium text-[var(--textPrimary)]">{type.label}</span>{' '}
+              ({(type.score * 100).toFixed(1)}%)
+            </div>
+          ) : (
+            <div className="mt-1 text-xs text-[var(--muted)]">No specific bias category detected.</div>
+          )}
+          {text ? (
+            <div className="mt-3 max-h-28 overflow-y-auto rounded-xl border border-[var(--panelHairline)]/40 bg-black/10 px-3 py-2 text-xs text-[var(--muted)]">
+              {text}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-2xl border border-[var(--panelHairline)]/30 bg-transparent px-4 py-3 text-sm text-[var(--muted)]">
+        <div className="text-xs uppercase tracking-wider text-[var(--muted)]/70">{label}</div>
+        <div className="mt-1">Awaiting conversation…</div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex min-h-[220px] flex-1 flex-col rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)]/92 shadow-[0_18px_45px_rgba(5,10,25,0.3)] backdrop-blur-xl">
+      <div className="flex items-center justify-between border-b border-[var(--panelHairline)]/60 bg-[var(--panelHeader)]/80 px-6 py-4">
+        <div className="flex items-center gap-3 text-sm font-semibold text-[var(--textPrimary)]">
+          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--panelBorder)] opacity-60" />
+          Bias insights · {panel.name.split('—')[0].trim()}
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col gap-3 px-6 py-5">
+        <div className="max-h-48 flex-1 overflow-y-auto space-y-3">
+          {renderSection('Prompt', prompt)}
+          {renderSection('Response', response)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ===== Main page =====
 export default function Page() {
   const { chats, addChat, renameChat, removeChat, hydrated } = useChatHistory();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeChatId, setActiveChatId] = useState<string>('');
   const [prompt, setPrompt] = useState('');
+  const [biasSummaries, setBiasSummaries] = useState<Record<string, BiasColumnState>>({});
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleBiasUpdate = useCallback((panelId: string, state: BiasColumnState) => {
+    setBiasSummaries((prev) => ({ ...prev, [panelId]: state }));
+  }, []);
 
   useEffect(() => {
     if (!hydrated || chats.length === 0) return;
@@ -328,22 +534,32 @@ export default function Page() {
 
         {/* Two fixed columns; scroll horizontally on narrow viewports */}
         <div className="flex min-h-0 flex-1 overflow-x-auto px-8 py-10">
-          <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center gap-12">
+          <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center gap-14">
             {hydrated && activeChatId ? (
               PANELS.map((p) => (
                 <ChatColumn
-                  key={p.id}
-                  panel={p}
-                  chatId={activeChatId}
-                  sharedPrompt={prompt}
-                  onFirstUserMessage={handleFirstUserMessage}
-                />
+                key={p.id}
+                panel={p}
+                chatId={activeChatId}
+                sharedPrompt={prompt}
+                onFirstUserMessage={handleFirstUserMessage}
+                onBiasUpdate={handleBiasUpdate}
+              />
               ))
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted)]">
                 Preparing chats…
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Bias summaries */}
+        <div className="px-8 pb-8">
+          <div className="mx-auto flex w-full max-w-[1300px] flex-wrap items-stretch justify-center gap-14">
+            {PANELS.map((p) => (
+              <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[p.id]} />
+            ))}
           </div>
         </div>
 

@@ -148,7 +148,7 @@ body {
   color: var(--textPrimary);
   font-size: 1rem;
   line-height: 1.6;
-  padding: 0;
+  padding: 0 0 0.3rem 0.45rem;
   resize: none;
   appearance: none;
   overflow: hidden;
