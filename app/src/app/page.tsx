@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { TextStreamChatTransport } from 'ai';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 // ===== Models to compare side-by-side =====
 type Panel = { id: string; name: string; endpoint: string; dot: string };
@@ -145,12 +147,14 @@ function ChatColumn({
   sharedPrompt,
   onFirstUserMessage,
   onBiasUpdate,
+  onMessagesUpdate,
 }: {
   panel: Panel;
   chatId: string;
   sharedPrompt: string;
   onFirstUserMessage: (text: string) => void;
   onBiasUpdate: (panelId: string, state: BiasColumnState) => void;
+  onMessagesUpdate?: (panelId: string, messages: any[]) => void;
 }) {
   // give each column a stable id bound to chatId so history separates per chat
   const { messages, sendMessage, status, error, stop } = useChat({
@@ -245,6 +249,12 @@ function ChatColumn({
   useEffect(() => {
     onBiasUpdate(panel.id, biasState);
   }, [biasState, onBiasUpdate, panel.id]);
+
+  useEffect(() => {
+    if (onMessagesUpdate) {
+      onMessagesUpdate(panel.id, messages);
+    }
+  }, [messages, onMessagesUpdate, panel.id]);
 
   useEffect(() => {
     setBiasState({ prompt: { status: 'idle' }, response: { status: 'idle' } });
@@ -344,18 +354,18 @@ function BiasSummaryCard({
   const renderSection = (label: string, slot: BiasSlotState) => {
     if (slot.status === 'loading') {
       return (
-        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/10 px-4 py-3 text-sm text-[var(--muted)]">
-          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
-          <div className="mt-1 text-sm">Analyzing sentences…</div>
+        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/10 px-5 py-4 text-sm text-[var(--muted)]">
+          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80 mb-3">{label}</div>
+          <div className="text-sm">Analyzing sentences…</div>
         </div>
       );
     }
 
     if (slot.status === 'error' && slot.error) {
       return (
-        <div className="rounded-2xl border border-red-500/40 bg-red-900/10 px-4 py-3 text-sm text-red-200">
-          <div className="text-xs uppercase tracking-wider text-red-200/80">{label}</div>
-          <div className="mt-1">{slot.error}</div>
+        <div className="rounded-2xl border border-red-500/40 bg-red-900/10 px-5 py-4 text-sm text-red-200">
+          <div className="text-xs uppercase tracking-wider text-red-200/80 mb-3">{label}</div>
+          <div>{slot.error}</div>
         </div>
       );
     }
@@ -386,11 +396,11 @@ function BiasSummaryCard({
       );
 
       return (
-        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/5 px-4 py-3 text-sm text-[var(--textPrimary)]">
-          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80">{label}</div>
+        <div className="rounded-2xl border border-[var(--panelHairline)]/60 bg-white/5 px-5 py-4 text-sm text-[var(--textPrimary)] max-h-[800px] overflow-y-auto">
+          <div className="text-xs uppercase tracking-wider text-[var(--muted)]/80 mb-4">{label}</div>
           
           {/* Statistics Summary */}
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
               <div className="text-[var(--muted)]">Total Sentences</div>
               <div className="font-semibold text-[var(--textPrimary)]">{statistics.totalSentences}</div>
@@ -409,76 +419,97 @@ function BiasSummaryCard({
             </div>
           </div>
 
-          {/* Bias Distribution Pie Chart */}
+          {/* Bias Percentage Progress Bar */}
           {statistics.totalSentences > 0 && (
-            <div className="mt-4">
-              <div className="mb-2 text-xs font-medium text-[var(--muted)]">Bias Distribution</div>
-              <ResponsiveContainer width="100%" height={120}>
-                <PieChart>
-                  <Pie
-                    data={biasDistributionData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={(props: any) => {
-                      const { name, percent } = props;
-                      return `${name}: ${((percent as number) * 100).toFixed(0)}%`;
-                    }}
-                    outerRadius={45}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="font-medium text-[var(--muted)]">Bias Level</span>
+                <span className="font-semibold text-[var(--textPrimary)]">
+                  {statistics.biasPercentage.toFixed(1)}%
+                </span>
+              </div>
+              <div className="h-3 w-full overflow-hidden rounded-full bg-[var(--panelHairline)]/30">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${statistics.biasPercentage}%`,
+                    backgroundColor: statistics.biasPercentage > 50 ? '#ef4444' : statistics.biasPercentage > 25 ? '#f59e0b' : '#10b981',
+                  }}
+                />
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] text-[var(--muted)]">
+                <span>0%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          )}
+
+          {/* Bias Distribution Comparison */}
+          {statistics.totalSentences > 0 && (
+            <div className="mt-6">
+              <div className="mb-2 text-xs font-medium text-[var(--muted)]">Distribution</div>
+              <ResponsiveContainer width="100%" height={100}>
+                <BarChart data={biasDistributionData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" width={60} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                     {biasDistributionData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           )}
 
-          {/* Bias Type Distribution Pie Chart */}
+          {/* Bias Types Horizontal Bar Chart - Better than pie chart for multiple types */}
           {biasTypeData.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-6">
               <div className="mb-2 text-xs font-medium text-[var(--muted)]">Bias Types</div>
-              <ResponsiveContainer width="100%" height={120}>
-                <PieChart>
-                  <Pie
-                    data={biasTypeData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={(props: any) => {
-                      const { name, percent } = props;
-                      return (percent as number) > 0.1 ? `${name}: ${((percent as number) * 100).toFixed(0)}%` : '';
-                    }}
-                    outerRadius={45}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {biasTypeData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+              {biasTypeData.length > 1 ? (
+                <ResponsiveContainer width="100%" height={Math.min(40 * biasTypeData.length, 200)}>
+                  <BarChart data={biasTypeData} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      {biasTypeData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center gap-3 rounded-lg border border-[var(--panelHairline)]/40 bg-black/10 px-4 py-3">
+                  <div
+                    className="h-8 w-1 rounded-full"
+                    style={{ backgroundColor: biasTypeData[0]?.color || '#f59e0b' }}
+                  />
+                  <div className="flex-1">
+                    <div className="text-xs font-medium text-[var(--textPrimary)]">{biasTypeData[0]?.name}</div>
+                    <div className="text-[10px] text-[var(--muted)]">
+                      {biasTypeData[0]?.value} {biasTypeData[0]?.value === 1 ? 'sentence' : 'sentences'}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Biased Sentences List */}
           {biasedSentences.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-6">
               <div className="mb-2 text-xs font-medium text-[var(--muted)]">
                 Biased Sentences ({biasedSentences.length})
               </div>
-              <div className="max-h-32 space-y-2 overflow-y-auto">
+              <div className="max-h-48 space-y-3 overflow-y-auto">
                 {biasedSentences.map((sentenceAnalysis, idx) => (
                   <div
                     key={idx}
-                    className="rounded-lg border border-red-500/30 bg-red-900/10 px-2 py-1.5 text-xs"
+                    className="rounded-lg border border-red-500/30 bg-red-900/10 px-3 py-2 text-xs"
                   >
                     <div className="text-[var(--textPrimary)]">{sentenceAnalysis.sentence}</div>
                     <div className="mt-1 flex items-center justify-between text-[var(--muted)]">
@@ -497,23 +528,23 @@ function BiasSummaryCard({
     }
 
     return (
-      <div className="rounded-2xl border border-[var(--panelHairline)]/30 bg-transparent px-4 py-3 text-sm text-[var(--muted)]">
-        <div className="text-xs uppercase tracking-wider text-[var(--muted)]/70">{label}</div>
-        <div className="mt-1">Awaiting conversation…</div>
+      <div className="rounded-2xl border border-[var(--panelHairline)]/30 bg-transparent px-5 py-4 text-sm text-[var(--muted)]">
+        <div className="text-xs uppercase tracking-wider text-[var(--muted)]/70 mb-3">{label}</div>
+        <div>Awaiting conversation…</div>
       </div>
     );
   };
 
   return (
-    <div className="flex min-h-[400px] flex-1 flex-col rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)]/92 shadow-[0_18px_45px_rgba(5,10,25,0.3)] backdrop-blur-xl">
-      <div className="flex items-center justify-between border-b border-[var(--panelHairline)]/60 bg-[var(--panelHeader)]/80 px-6 py-4">
+    <div className="flex max-h-[600px] min-h-[400px] flex-1 flex-col rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)]/92 shadow-[0_18px_45px_rgba(5,10,25,0.3)] backdrop-blur-xl">
+      <div className="flex items-center justify-between border-b border-[var(--panelHairline)]/60 bg-[var(--panelHeader)]/80 px-6 py-4 shrink-0">
         <div className="flex items-center gap-3 text-sm font-semibold text-[var(--textPrimary)]">
           <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--panelBorder)] opacity-60" />
           Bias insights · {panel.name.split('—')[0].trim()}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-4 px-6 py-5">
-        <div className="space-y-4 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-6 px-6 py-6 overflow-y-auto">
+        <div className="space-y-6">
           {renderSection('Prompt', prompt)}
           {renderSection('Response', response)}
         </div>
@@ -529,10 +560,17 @@ export default function Page() {
   const [activeChatId, setActiveChatId] = useState<string>('');
   const [prompt, setPrompt] = useState('');
   const [biasSummaries, setBiasSummaries] = useState<Record<string, BiasColumnState>>({});
+  const [allMessages, setAllMessages] = useState<Record<string, any[]>>({});
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const handleBiasUpdate = useCallback((panelId: string, state: BiasColumnState) => {
     setBiasSummaries((prev) => ({ ...prev, [panelId]: state }));
+  }, []);
+
+  const handleMessagesUpdate = useCallback((panelId: string, messages: any[]) => {
+    setAllMessages((prev) => ({ ...prev, [panelId]: messages }));
   }, []);
 
   useEffect(() => {
@@ -563,17 +601,181 @@ export default function Page() {
     [chats, activeChatId]
   );
 
-  // Export all messages of this chat (per column) to JSON
-  const exportChat = () => {
+  // Export chat data with full messages and bias statistics
+  const exportChatJSON = () => {
     if (!canUseChat) return;
+    
+    const exportData = {
+      chat: activeChat,
+      exportedAt: new Date().toISOString(),
+      models: PANELS.map((panel) => {
+        const messages = allMessages[panel.id] || [];
+        const biasAnalysis = biasSummaries[panel.id];
+        
+        return {
+          id: panel.id,
+          name: panel.name,
+          messages: messages.map((msg) => ({
+            role: msg.role,
+            content: getTextFromParts(msg.parts),
+            timestamp: msg.createdAt || msg.timestamp,
+          })),
+          biasAnalysis: biasAnalysis ? {
+            prompt: biasAnalysis.prompt.status === 'ready' ? {
+              text: biasAnalysis.prompt.text,
+              statistics: biasAnalysis.prompt.result?.statistics,
+              sentences: biasAnalysis.prompt.result?.sentences,
+            } : null,
+            response: biasAnalysis.response.status === 'ready' ? {
+              text: biasAnalysis.response.text,
+              statistics: biasAnalysis.response.result?.statistics,
+              sentences: biasAnalysis.response.result?.sentences,
+            } : null,
+          } : null,
+        };
+      }),
+    };
+    
     const blob = new Blob(
-      [JSON.stringify({ chat: activeChat, models: PANELS.map(p => p.id) }, null, 2)],
+      [JSON.stringify(exportData, null, 2)],
       { type: 'application/json' }
     );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `chat-${activeChat?.title || activeChatId}.json`;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    a.href = url;
+    a.download = `chat-${activeChat?.title || activeChatId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export as PDF with visuals
+  const exportChatPDF = async () => {
+    if (!canUseChat) return;
+    
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      let yPosition = 20;
+      
+      // Header
+      pdf.setFontSize(18);
+      pdf.text('LLM Bias Analysis Report', pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 10;
+      
+      pdf.setFontSize(12);
+      pdf.text(`Chat: ${activeChat?.title || 'Untitled'}`, pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 5;
+      pdf.text(`Exported: ${new Date().toLocaleString()}`, pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 15;
+      
+      // For each model
+      for (const panel of PANELS) {
+        if (yPosition > pageHeight - 40) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(panel.name, 20, yPosition);
+        yPosition += 8;
+        
+        const messages = allMessages[panel.id] || [];
+        const biasAnalysis = biasSummaries[panel.id];
+        
+        // Messages
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text('Messages:', 20, yPosition);
+        yPosition += 6;
+        
+        for (const msg of messages) {
+          if (yPosition > pageHeight - 20) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          
+          const content = getTextFromParts(msg.parts);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text(`${msg.role === 'user' ? 'User' : 'Assistant'}:`, 20, yPosition);
+          yPosition += 6;
+          
+          pdf.setFont('helvetica', 'normal');
+          const lines = pdf.splitTextToSize(content, pageWidth - 40);
+          pdf.text(lines, 25, yPosition);
+          yPosition += lines.length * 5 + 3;
+        }
+        
+        // Bias Analysis
+        if (biasAnalysis) {
+          if (yPosition > pageHeight - 30) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          
+          yPosition += 5;
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('Bias Analysis:', 20, yPosition);
+          yPosition += 6;
+          
+          // Prompt analysis
+          if (biasAnalysis.prompt.status === 'ready' && biasAnalysis.prompt.result) {
+            const stats = biasAnalysis.prompt.result.statistics;
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('Prompt Analysis:', 25, yPosition);
+            yPosition += 6;
+            pdf.setFont('helvetica', 'normal');
+            pdf.text(`Total Sentences: ${stats.totalSentences}`, 30, yPosition);
+            yPosition += 5;
+            pdf.text(`Biased: ${stats.biasedSentences} (${stats.biasPercentage.toFixed(1)}%)`, 30, yPosition);
+            yPosition += 5;
+            pdf.text(`Unbiased: ${stats.unbiasedSentences}`, 30, yPosition);
+            yPosition += 8;
+          }
+          
+          // Response analysis
+          if (biasAnalysis.response.status === 'ready' && biasAnalysis.response.result) {
+            if (yPosition > pageHeight - 30) {
+              pdf.addPage();
+              yPosition = 20;
+            }
+            
+            const stats = biasAnalysis.response.result.statistics;
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('Response Analysis:', 25, yPosition);
+            yPosition += 6;
+            pdf.setFont('helvetica', 'normal');
+            pdf.text(`Total Sentences: ${stats.totalSentences}`, 30, yPosition);
+            yPosition += 5;
+            pdf.text(`Biased: ${stats.biasedSentences} (${stats.biasPercentage.toFixed(1)}%)`, 30, yPosition);
+            yPosition += 5;
+            pdf.text(`Unbiased: ${stats.unbiasedSentences}`, 30, yPosition);
+            yPosition += 5;
+            
+            // Bias types
+            if (Object.keys(stats.biasTypeCounts).length > 0) {
+              pdf.text('Bias Types:', 30, yPosition);
+              yPosition += 5;
+              for (const [type, count] of Object.entries(stats.biasTypeCounts)) {
+                pdf.text(`  • ${type}: ${count}`, 35, yPosition);
+                yPosition += 5;
+              }
+            }
+            yPosition += 8;
+          }
+        }
+        
+        yPosition += 5;
+      }
+      
+      pdf.save(`chat-${activeChat?.title || activeChatId}.pdf`);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Failed to export PDF. Please try again.');
+    }
   };
 
   // Send to all
@@ -583,8 +785,19 @@ export default function Page() {
     setPrompt('');
   };
 
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
-    <div className="flex h-screen">
+    <div className="flex min-h-screen">
       {/* Sidebar */}
       {sidebarOpen && (
         <aside className="sidebar w-[280px] shrink-0 p-3">
@@ -618,7 +831,31 @@ export default function Page() {
 
           {activeChat && (
             <div className="mt-3 flex gap-2">
-              <button className="btn w-full" onClick={() => exportChat()} disabled={!canUseChat}>Export</button>
+              <div className="relative flex-1" ref={exportMenuRef}>
+                <button
+                  className="btn w-full"
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  disabled={!canUseChat}
+                >
+                  Export ▼
+                </button>
+                {showExportMenu && (
+                  <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-[var(--panelHairline)] bg-[var(--panel)] shadow-lg z-50">
+                    <button
+                      className="btn ghost w-full rounded-b-none rounded-t-lg px-3 py-2 text-sm"
+                      onClick={() => { exportChatJSON(); setShowExportMenu(false); }}
+                    >
+                      Export as JSON
+                    </button>
+                    <button
+                      className="btn ghost w-full rounded-t-none rounded-b-lg px-3 py-2 text-sm"
+                      onClick={() => { exportChatPDF(); setShowExportMenu(false); }}
+                    >
+                      Export as PDF
+                    </button>
+                  </div>
+                )}
+              </div>
               <button className="btn w-full" disabled={!canUseChat} onClick={() => {
                 if (!activeChatId) return;
                 removeChat(activeChatId);
@@ -637,9 +874,9 @@ export default function Page() {
       )}
 
       {/* Main */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex h-16 items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 backdrop-blur-md">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 backdrop-blur-md">
           <div className="flex items-center gap-3">
             {!sidebarOpen && (
               <button className="btn ghost" onClick={() => setSidebarOpen(true)} title="Show sidebar">☰</button>
@@ -648,46 +885,69 @@ export default function Page() {
             <span className="badge hidden md:inline">Compare models side-by-side</span>
           </div>
           <div className="flex items-center gap-2">
-            <button className="btn" onClick={exportChat} disabled={!canUseChat}>Export</button>
+            <div className="relative" ref={exportMenuRef}>
+              <button className="btn" onClick={() => setShowExportMenu(!showExportMenu)} disabled={!canUseChat}>
+                Export ▼
+              </button>
+              {showExportMenu && (
+                <div className="absolute top-full right-0 mt-1 w-40 rounded-lg border border-[var(--panelHairline)] bg-[var(--panel)] shadow-lg z-50">
+                  <button
+                    className="btn ghost w-full rounded-b-none rounded-t-lg px-3 py-2 text-sm"
+                    onClick={() => { exportChatJSON(); setShowExportMenu(false); }}
+                  >
+                    Export as JSON
+                  </button>
+                  <button
+                    className="btn ghost w-full rounded-t-none rounded-b-lg px-3 py-2 text-sm"
+                    onClick={() => { exportChatPDF(); setShowExportMenu(false); }}
+                  >
+                    Export as PDF
+                  </button>
+                </div>
+              )}
+            </div>
             <button className="btn" onClick={() => { if (!hydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }} disabled={!hydrated}>
               ＋ New
             </button>
           </div>
         </header>
 
-        {/* Two fixed columns; scroll horizontally on narrow viewports */}
-        <div className="flex min-h-0 flex-1 overflow-x-auto px-8 py-10">
-          <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center gap-14">
-            {hydrated && activeChatId ? (
-              PANELS.map((p) => (
-                <ChatColumn
-                key={p.id}
-                panel={p}
-                chatId={activeChatId}
-                sharedPrompt={prompt}
-                onFirstUserMessage={handleFirstUserMessage}
-                onBiasUpdate={handleBiasUpdate}
-              />
-              ))
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted)]">
-                Preparing chats…
-              </div>
-            )}
+        {/* Scrollable content area */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {/* Two fixed columns; scroll horizontally on narrow viewports */}
+          <div className="flex overflow-x-auto px-8 py-12">
+            <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center gap-14">
+              {hydrated && activeChatId ? (
+                PANELS.map((p) => (
+                  <ChatColumn
+                  key={p.id}
+                  panel={p}
+                  chatId={activeChatId}
+                  sharedPrompt={prompt}
+                  onFirstUserMessage={handleFirstUserMessage}
+                  onBiasUpdate={handleBiasUpdate}
+                  onMessagesUpdate={handleMessagesUpdate}
+                />
+                ))
+              ) : (
+                <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted)]">
+                  Preparing chats…
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* Bias summaries */}
-        <div className="px-8 pb-8">
+        <div className="px-8 pb-12 pt-8">
           <div className="mx-auto flex w-full max-w-[1300px] flex-wrap items-stretch justify-center gap-14">
-            {PANELS.map((p) => (
-              <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[p.id]} />
-            ))}
+              {PANELS.map((p) => (
+                <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[p.id]} />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* Composer (bottom, big and pretty) */}
-        <footer className="border-t border-transparent px-8 pb-12 pt-6">
+          {/* Composer (bottom, big and pretty) */}
+          <footer className="border-t border-transparent px-8 pb-12 pt-6 shrink-0">
           <div className="mx-auto w-full max-w-[960px]">
             <div className="flex flex-col overflow-hidden rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
               <div className="px-7 pt-6 pb-2">
@@ -718,7 +978,8 @@ export default function Page() {
               Reasoning may be incorrect. Compare tone and citations across models.
             </div>
           </div>
-        </footer>
+          </footer>
+        </div>
       </div>
     </div>
   );
