@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useChat } from '@ai-sdk/react';
 import { TextStreamChatTransport } from 'ai';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
@@ -13,15 +14,16 @@ import remarkGfm from 'remark-gfm';
 type ModelOption = { id: string; name: string; endpoint: string; dot: string };
 
 const AVAILABLE_MODELS: ModelOption[] = [
-  { id: 'openai/gpt-5', name: 'OpenAI — GPT-5', endpoint: '/api/chat?model=openai/gpt-5', dot: 'bg-cyan-400' },
+  //{ id: 'openai/gpt-5', name: 'OpenAI — GPT-5', endpoint: '/api/chat?model=openai/gpt-5', dot: 'bg-cyan-400' },
   { id: 'google/gemini-2.5-flash-lite', name: 'Google — Gemini 2.5 Flash Lite', endpoint: '/api/chat?model=google/gemini-2.5-flash-lite', dot: 'bg-blue-400' },
   { id: 'deepseek/deepseek-v3.1', name: 'DeepSeek — DeepSeek V3.1', endpoint: '/api/chat?model=deepseek/deepseek-v3.1', dot: 'bg-purple-400' },
-  { id: 'xai/grok-4', name: 'xAI — Grok-4', endpoint: '/api/chat?model=xai/grok-4', dot: 'bg-pink-400' },
+  //{ id: 'xai/grok-4', name: 'xAI — Grok-4', endpoint: '/api/chat?model=xai/grok-4', dot: 'bg-pink-400' },
   { id: 'minimax/minimax-m2', name: 'MiniMax — MiniMax M2', endpoint: '/api/chat?model=minimax/minimax-m2', dot: 'bg-indigo-400' },
-  { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic — Claude 3.5 Sonnet', endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
+// { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic — Claude 3.5 Sonnet', endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
   { id: 'mistral/ministral-3b', name: 'Mistral — Mixtral 3B', endpoint: '/api/chat?model=mistral/ministral-3b', dot: 'bg-orange-400' },
   { id: 'meituan/longcat-flash-chat', name: 'Meituan — LongCat Flash Chat', endpoint: '/api/chat?model=meituan/longcat-flash-chat', dot: 'bg-teal-400' },
-
+  { id: 'openai/text-embedding-3-small', name: 'OpenAI — Text Embedding 3 Small', endpoint: '/api/chat?model=openai/text-embedding-3-small', dot: 'bg-green-400' },
+  { id: 'meta/llama-3.1-8b', name: 'Meta — Llama 3.1 8B', endpoint: '/api/chat?model=meta/llama-3.1-8b', dot: 'bg-red-400' },
 ];
 
 const DEFAULT_MODELS = ['minimax/minimax-m2', 'meituan/longcat-flash-chat'];
@@ -241,6 +243,36 @@ function ChatColumn({
 }) {
   const [showModelSelector, setShowModelSelector] = useState(false);
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number; width: number } | null>(null);
+  const updateDropdownPosition = useCallback(() => {
+    if (typeof window === 'undefined' || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const minWidth = 288; // 18rem to match previous min width
+    const padding = 16;
+    const viewportWidth = window.innerWidth;
+    const maxWidth = Math.max(minWidth, viewportWidth - padding * 2);
+    const width = Math.min(Math.max(rect.width, minWidth), maxWidth);
+    let left = rect.left;
+    if (left + width > window.innerWidth - padding) {
+      left = Math.max(padding, window.innerWidth - width - padding);
+    }
+    left = Math.max(padding, left);
+    const top = rect.bottom + 8;
+    setDropdownStyle({ top, left, width });
+  }, []);
+  const toggleModelSelector = useCallback(() => {
+    setShowModelSelector((prev) => {
+      const next = !prev;
+      if (next) {
+        updateDropdownPosition();
+      } else {
+        setDropdownStyle(null);
+      }
+      return next;
+    });
+  }, [updateDropdownPosition]);
   
   const storageKey = `${chatId}:${panel.id}`;
   
@@ -361,13 +393,34 @@ function ChatColumn({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        modelSelectorRef.current &&
+        !modelSelectorRef.current.contains(target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(target))
+      ) {
         setShowModelSelector(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!showModelSelector) {
+      setDropdownStyle(null);
+      return;
+    }
+
+    updateDropdownPosition();
+    const handleReposition = () => updateDropdownPosition();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [showModelSelector, updateDropdownPosition]);
 
   // Persist messages to localStorage whenever they change
   useEffect(() => {
@@ -411,7 +464,8 @@ function ChatColumn({
             <span className={`h-2.5 w-2.5 rounded-full ${panel.dot} shrink-0`} />
             <div className={`relative flex-1 min-w-0 ${showModelSelector ? 'z-[10000]' : ''}`} ref={modelSelectorRef}>
               <button
-                onClick={() => setShowModelSelector(!showModelSelector)}
+                ref={buttonRef}
+                onClick={toggleModelSelector}
                 className="flex items-center gap-2 text-[14px] font-semibold tracking-wide text-white border-none rounded-lg px-3 py-1.5 transition-all truncate"
                 style={{
                   background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
@@ -422,52 +476,66 @@ function ChatColumn({
                 <span className="truncate">{panel.name}</span>
                 <span className="text-xs opacity-80 shrink-0">▼</span>
               </button>
-              {showModelSelector && (
-                <div className="absolute top-full left-0 mt-1 min-w-[18rem] max-w-[32rem] rounded-lg border border-slate-700 bg-[rgba(15,18,28,0.98)] text-white shadow-xl z-[10000] p-2 backdrop-blur">
-                  <div className="space-y-1 max-h-[70vh] overflow-y-auto">
-                    {AVAILABLE_MODELS.map((model) => {
-                      // Match model ID with panel ID (panel.id has / replaced with -)
-                      const normalizedPanelId = panel.id.replace(/-/g, '/').replace(/\./g, '/');
-                      const isCurrentModel = model.id === normalizedPanelId || model.id.replace(/[\/\.]/g, '-') === panel.id;
-                      const isOtherColumn = model.id === otherSelectedModel;
-                      const canSelect = isCurrentModel || !isOtherColumn;
-                      
-                      return (
-                        <button
-                          key={model.id}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
-                            isCurrentModel
-                              ? 'text-white font-semibold border-none'
-                              : isOtherColumn
-                              ? 'opacity-60 cursor-not-allowed text-slate-400'
-                              : 'text-white hover:bg-white/10'
-                          }`}
-                          style={
-                            isCurrentModel
-                              ? {
-                                  background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-                                  boxShadow: '0 14px 30px rgba(107, 114, 255, 0.45)',
-                                }
-                              : undefined
-                          }
-                          onClick={() => {
-                            if (!canSelect) return;
-                            if (!isCurrentModel) {
-                              onModelChange(columnIndex, model.id);
-                              setShowModelSelector(false);
+              {showModelSelector && dropdownStyle && typeof document !== 'undefined' &&
+                createPortal(
+                  <div
+                    ref={dropdownRef}
+                    className="rounded-lg border border-slate-700 bg-[rgba(15,18,28,0.98)] text-white shadow-xl p-2 backdrop-blur"
+                    style={{
+                      position: 'fixed',
+                      top: dropdownStyle.top,
+                      left: dropdownStyle.left,
+                      width: dropdownStyle.width,
+                      minWidth: '18rem',
+                      maxWidth: '32rem',
+                      zIndex: 10000,
+                    }}
+                  >
+                    <div className="space-y-1 max-h-[70vh] overflow-y-auto">
+                      {AVAILABLE_MODELS.map((model) => {
+                        const normalizedPanelId = panel.id.replace(/-/g, '/').replace(/\./g, '/');
+                        const isCurrentModel =
+                          model.id === normalizedPanelId || model.id.replace(/[\/\.]/g, '-') === panel.id;
+                        const isOtherColumn = model.id === otherSelectedModel;
+                        const canSelect = isCurrentModel || !isOtherColumn;
+
+                        return (
+                          <button
+                            key={model.id}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+                              isCurrentModel
+                                ? 'text-white font-semibold border-none'
+                                : isOtherColumn
+                                ? 'opacity-60 cursor-not-allowed text-slate-400'
+                                : 'text-white hover:bg-white/10'
+                            }`}
+                            style={
+                              isCurrentModel
+                                ? {
+                                    background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
+                                    boxShadow: '0 14px 30px rgba(107, 114, 255, 0.45)',
+                                  }
+                                : undefined
                             }
-                          }}
-                          disabled={!canSelect}
-                        >
-                          <span className={`h-2.5 w-2.5 rounded-full ${model.dot} shrink-0`} />
-                          <span className="whitespace-normal break-words">{model.name}</span>
-                          {isCurrentModel && <span className="ml-auto text-xs shrink-0">✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                            onClick={() => {
+                              if (!canSelect) return;
+                              if (!isCurrentModel) {
+                                onModelChange(columnIndex, model.id);
+                                setShowModelSelector(false);
+                              }
+                            }}
+                            disabled={!canSelect}
+                          >
+                            <span className={`h-2.5 w-2.5 rounded-full ${model.dot} shrink-0`} />
+                            <span className="whitespace-normal break-words">{model.name}</span>
+                            {isCurrentModel && <span className="ml-auto text-xs shrink-0">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>,
+                  document.body
+                )}
             </div>
             <span className="badge shrink-0">Streaming: {status === 'streaming' ? 'yes' : 'no'}</span>
           </div>
@@ -1338,6 +1406,14 @@ export default function Page() {
             <span className="badge hidden md:inline">Compare model biases side-by-side</span>
           </div>
           <div className="flex items-center gap-2">
+            <a
+              className="btn"
+              href="https://docs.google.com/forms/d/e/1FAIpQLSd7YMQ-15J2oHZ4_Ihdsa4FJHb0JMANY5-JAP2Tt6EQn2N4Mg/viewform?usp=publish-editor"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Give Feedback
+            </a>
             <div className="relative" ref={exportMenuRef}>
               <button className="btn" onClick={() => setShowExportMenu(!showExportMenu)} disabled={!canUseChat}>
                 Export ▼
