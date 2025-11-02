@@ -18,6 +18,8 @@ const AVAILABLE_MODELS: ModelOption[] = [
   { id: 'minimax/minimax-m2', name: 'MiniMax — MiniMax M2', endpoint: '/api/chat?model=minimax/minimax-m2', dot: 'bg-indigo-400' },
   { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic — Claude 3.5 Sonnet', endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
   { id: 'mistral/ministral-3b', name: 'Mistral — Mixtral 3B', endpoint: '/api/chat?model=mistral/ministral-3b', dot: 'bg-orange-400' },
+  { id: 'meituan/longcat-flash-chat', name: 'meituan -- longcat-flash-chat', endpoint: '/api/chat?model=meituan/longcat-flash-chat', dot: 'bg-orange-400' },
+
 ];
 
 const DEFAULT_MODELS = ['openai/gpt-5', 'google/gemini-2.5-flash-lite'];
@@ -302,7 +304,7 @@ function ChatColumn({
 
   return (
     <section className="flex h-full min-w-[420px] max-w-[560px] flex-1 px-4 py-3">
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
+      <div className="flex h-full w-full flex-col overflow-visible rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
         {/* Column header */}
         <div className="flex items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-7 py-[18px]">
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -321,11 +323,8 @@ function ChatColumn({
                 <span className="text-xs opacity-80 shrink-0">▼</span>
               </button>
               {showModelSelector && (
-                <div className="absolute top-full left-0 mt-1 w-56 rounded-lg border border-[var(--panelHairline)] bg-[var(--panel)] shadow-lg z-50 p-2">
-                  <div className="mb-2 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider">
-                    Select Model
-                  </div>
-                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 min-w-[18rem] max-w-[32rem] rounded-lg border border-slate-700 bg-[rgba(15,18,28,0.98)] text-white shadow-xl z-50 p-2 backdrop-blur">
+                  <div className="space-y-1 max-h-[70vh] overflow-y-auto">
                     {AVAILABLE_MODELS.map((model) => {
                       // Match model ID with panel ID (panel.id has / replaced with -)
                       const normalizedPanelId = panel.id.replace(/-/g, '/').replace(/\./g, '/');
@@ -338,10 +337,10 @@ function ChatColumn({
                           key={model.id}
                           className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
                             isCurrentModel
-                              ? 'text-white border-none'
+                              ? 'text-white font-semibold border-none'
                               : isOtherColumn
-                              ? 'opacity-50 cursor-not-allowed text-[var(--muted)]'
-                              : 'hover:bg-[var(--panelHairline)]/50 text-[var(--textPrimary)]'
+                              ? 'opacity-60 cursor-not-allowed text-slate-400'
+                              : 'text-white hover:bg-white/10'
                           }`}
                           style={
                             isCurrentModel
@@ -361,7 +360,7 @@ function ChatColumn({
                           disabled={!canSelect}
                         >
                           <span className={`h-2.5 w-2.5 rounded-full ${model.dot} shrink-0`} />
-                          <span className="truncate">{model.name}</span>
+                          <span className="whitespace-normal break-words">{model.name}</span>
                           {isCurrentModel && <span className="ml-auto text-xs shrink-0">✓</span>}
                         </button>
                       );
