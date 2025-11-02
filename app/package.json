@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^2.0.26",
+    "@ai-sdk/openai": "^2.0.59",
+    "@ai-sdk/react": "^2.0.86",
+    "ai": "^5.0.86",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.3",
     "next": "16.0.1",
