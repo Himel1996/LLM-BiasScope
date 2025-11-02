@@ -18,7 +18,7 @@ const AVAILABLE_MODELS: ModelOption[] = [
   { id: 'minimax/minimax-m2', name: 'MiniMax — MiniMax M2', endpoint: '/api/chat?model=minimax/minimax-m2', dot: 'bg-indigo-400' },
   { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic — Claude 3.5 Sonnet', endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
   { id: 'mistral/ministral-3b', name: 'Mistral — Mixtral 3B', endpoint: '/api/chat?model=mistral/ministral-3b', dot: 'bg-orange-400' },
-  { id: 'meituan/longcat-flash-chat', name: 'meituan -- longcat-flash-chat', endpoint: '/api/chat?model=meituan/longcat-flash-chat', dot: 'bg-orange-400' },
+  { id: 'meituan/longcat-flash-chat', name: 'Meituan — LongCat Flash Chat', endpoint: '/api/chat?model=meituan/longcat-flash-chat', dot: 'bg-teal-400' },
 
 ];
 
@@ -154,6 +154,9 @@ function MessageBubble({
   );
 }
 
+// Add a new localStorage key for messages
+const MESSAGES_STORAGE_KEY = 'biascope_messages_v1';
+
 // ===== One chat column =====
 function ChatColumn({
   panel,
@@ -178,8 +181,11 @@ function ChatColumn({
 }) {
   const [showModelSelector, setShowModelSelector] = useState(false);
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  
+  const storageKey = `${chatId}:${panel.id}`;
+  
   // give each column a stable id bound to chatId so history separates per chat
-  const { messages, sendMessage, status, error, stop } = useChat({
+  const { messages, sendMessage, status, error, stop, setMessages } = useChat({
     id: `${chatId}:${panel.id}`,
     transport: new TextStreamChatTransport({ api: panel.endpoint }),
   });
@@ -281,6 +287,7 @@ function ChatColumn({
   useEffect(() => {
     setBiasState({ prompt: { status: 'idle' }, response: { status: 'idle' } });
     lastAnalyzedText.current = { prompt: '', response: '' };
+    firstUserSent.current = false;
   }, [chatId, panel.id]);
 
   const send = async (text: string) => {
@@ -302,14 +309,47 @@ function ChatColumn({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window === 'undefined' || !messages.length) return;
+    
+    try {
+      const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+      const allStoredMessages = stored ? JSON.parse(stored) : {};
+      allStoredMessages[storageKey] = messages;
+      localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(allStoredMessages));
+    } catch (err) {
+      console.error('Failed to save messages to localStorage:', err);
+    }
+  }, [messages, storageKey]);
+
+  // Load messages when chatId or panel.id changes
+  useEffect(() => {
+    if (typeof window === 'undefined' || !setMessages) return;
+    try {
+      const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+      if (stored) {
+        const allStoredMessages = JSON.parse(stored);
+        const key = `${chatId}:${panel.id}`;
+        const savedMessages = allStoredMessages[key] || [];
+        if (savedMessages.length > 0 && messages.length === 0) {
+          setMessages(savedMessages);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, panel.id]);
+
   return (
     <section className="flex h-full min-w-[420px] max-w-[560px] flex-1 px-4 py-3">
       <div className="flex h-full w-full flex-col overflow-visible rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
         {/* Column header */}
-        <div className="flex items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-7 py-[18px]">
+        <div className={`flex items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-7 py-[18px] ${showModelSelector ? 'relative z-[9999]' : ''}`}>
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
             <span className={`h-2.5 w-2.5 rounded-full ${panel.dot} shrink-0`} />
-            <div className="relative flex-1 min-w-0" ref={modelSelectorRef}>
+            <div className={`relative flex-1 min-w-0 ${showModelSelector ? 'z-[10000]' : ''}`} ref={modelSelectorRef}>
               <button
                 onClick={() => setShowModelSelector(!showModelSelector)}
                 className="flex items-center gap-2 text-[14px] font-semibold tracking-wide text-white border-none rounded-lg px-3 py-1.5 transition-all truncate"
@@ -323,7 +363,7 @@ function ChatColumn({
                 <span className="text-xs opacity-80 shrink-0">▼</span>
               </button>
               {showModelSelector && (
-                <div className="absolute top-full left-0 mt-1 min-w-[18rem] max-w-[32rem] rounded-lg border border-slate-700 bg-[rgba(15,18,28,0.98)] text-white shadow-xl z-50 p-2 backdrop-blur">
+                <div className="absolute top-full left-0 mt-1 min-w-[18rem] max-w-[32rem] rounded-lg border border-slate-700 bg-[rgba(15,18,28,0.98)] text-white shadow-xl z-[10000] p-2 backdrop-blur">
                   <div className="space-y-1 max-h-[70vh] overflow-y-auto">
                     {AVAILABLE_MODELS.map((model) => {
                       // Match model ID with panel ID (panel.id has / replaced with -)
@@ -694,7 +734,7 @@ function useModelSelection() {
 export default function Page() {
   const { chats, addChat, renameChat, removeChat, hydrated: chatsHydrated } = useChatHistory();
   const { selectedModels, setModel, hydrated: modelsHydrated } = useModelSelection();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeChatId, setActiveChatId] = useState<string>('');
   const [prompt, setPrompt] = useState('');
   const [biasSummaries, setBiasSummaries] = useState<Record<string, BiasColumnState>>({});
@@ -721,12 +761,16 @@ export default function Page() {
   }, [setModel]);
 
   const handleBiasUpdate = useCallback((panelId: string, state: BiasColumnState) => {
-    setBiasSummaries((prev) => ({ ...prev, [panelId]: state }));
-  }, []);
+    if (!activeChatId) return;
+    const key = `${activeChatId}:${panelId}`;
+    setBiasSummaries((prev) => ({ ...prev, [key]: state }));
+  }, [activeChatId]);
 
   const handleMessagesUpdate = useCallback((panelId: string, messages: any[]) => {
-    setAllMessages((prev) => ({ ...prev, [panelId]: messages }));
-  }, []);
+    if (!activeChatId) return;
+    const key = `${activeChatId}:${panelId}`;
+    setAllMessages((prev) => ({ ...prev, [key]: messages }));
+  }, [activeChatId]);
 
   useEffect(() => {
     if (!chatsHydrated || chats.length === 0) return;
@@ -734,6 +778,7 @@ export default function Page() {
       setActiveChatId(chats[0].id);
     }
   }, [chatsHydrated, chats, activeChatId]);
+
 
   useEffect(() => {
     const el = composerRef.current;
@@ -764,8 +809,8 @@ export default function Page() {
       chat: activeChat,
       exportedAt: new Date().toISOString(),
       models: panels.map((panel) => {
-        const messages = allMessages[panel.id] || [];
-        const biasAnalysis = biasSummaries[panel.id];
+        const messages = allMessages[`${activeChatId}:${panel.id}`] || [];
+        const biasAnalysis = biasSummaries[`${activeChatId}:${panel.id}`];
         
         return {
           id: panel.id,
@@ -838,8 +883,8 @@ export default function Page() {
         pdf.text(panel.name, 20, yPosition);
         yPosition += 8;
         
-        const messages = allMessages[panel.id] || [];
-        const biasAnalysis = biasSummaries[panel.id];
+        const messages = allMessages[`${activeChatId}:${panel.id}`] || [];
+        const biasAnalysis = biasSummaries[`${activeChatId}:${panel.id}`];
         
         // Messages
         pdf.setFontSize(12);
@@ -953,89 +998,12 @@ export default function Page() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
-      {sidebarOpen && (
-        <aside className="sidebar w-[280px] shrink-0 p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-sm font-semibold opacity-90">Chatbot</div>
-            <button className="btn ghost" onClick={() => setSidebarOpen(false)} title="Hide sidebar">⟨</button>
-          </div>
-
-          <button
-            className="btn primary w-full mb-3"
-            onClick={() => { if (!chatsHydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }}
-            title="+ New chat"
-            disabled={!chatsHydrated}
-          >
-            ＋ New chat
-          </button>
-
-          <div className="space-y-1">
-            {chats.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setActiveChatId(c.id)}
-                className={`sidebar-item w-full justify-between ${activeChatId === c.id ? 'bg-[#161b25]' : ''}`}
-                title={new Date(c.createdAt).toLocaleString()}
-              >
-                <span className="truncate">{c.title}</span>
-                <span className="text-xs text-[var(--muted)]">{new Date(c.createdAt).toLocaleDateString()}</span>
-              </button>
-            ))}
-          </div>
-
-          {activeChat && (
-            <div className="mt-3 flex gap-2">
-              <div className="relative flex-1" ref={exportMenuRef}>
-                <button
-                  className="btn w-full"
-                  onClick={() => setShowExportMenu(!showExportMenu)}
-                  disabled={!canUseChat}
-                >
-                  Export ▼
-                </button>
-                {showExportMenu && (
-                  <div className="absolute bottom-full left-0 mb-1 w-full rounded-lg border border-[var(--panelHairline)] bg-[var(--panel)] shadow-lg z-50">
-                    <button
-                      className="btn ghost w-full rounded-b-none rounded-t-lg px-3 py-2 text-sm"
-                      onClick={() => { exportChatJSON(); setShowExportMenu(false); }}
-                    >
-                      Export as JSON
-                    </button>
-                    <button
-                      className="btn ghost w-full rounded-t-none rounded-b-lg px-3 py-2 text-sm"
-                      onClick={() => { exportChatPDF(); setShowExportMenu(false); }}
-                    >
-                      Export as PDF
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button className="btn w-full" disabled={!canUseChat} onClick={() => {
-                if (!activeChatId) return;
-                removeChat(activeChatId);
-                const next = addChat();
-                setActiveChatId(next.id);
-              }}>
-                Delete
-              </button>
-            </div>
-          )}
-
-          <div className="mt-6 text-[11px] text-[var(--muted)]">
-            You have reached the end of your chat history.
-          </div>
-        </aside>
-      )}
-
+      {/* Sidebar - DISABLED */}
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top bar */}
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 backdrop-blur-md">
           <div className="flex items-center gap-3">
-            {!sidebarOpen && (
-              <button className="btn ghost" onClick={() => setSidebarOpen(true)} title="Show sidebar">☰</button>
-            )}
             <h1>LLM Bias Scope</h1>
             <span className="badge hidden md:inline">Compare models side-by-side</span>
           </div>
@@ -1061,9 +1029,6 @@ export default function Page() {
                 </div>
               )}
             </div>
-            <button className="btn" onClick={() => { if (!chatsHydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }} disabled={!chatsHydrated}>
-              ＋ New
-            </button>
           </div>
         </header>
 
@@ -1075,7 +1040,7 @@ export default function Page() {
               {chatsHydrated && modelsHydrated && activeChatId && panels.length === 2 ? (
                 panels.map((p, idx) => (
                   <ChatColumn
-                  key={p.id}
+                  key={`${activeChatId}-${p.id}`}
                   panel={p}
                   chatId={activeChatId}
                   sharedPrompt={prompt}
@@ -1099,7 +1064,7 @@ export default function Page() {
         <div className="px-8 pb-12 pt-8">
           <div className="mx-auto flex w-full max-w-[1300px] flex-wrap items-stretch justify-center gap-14">
               {panels.map((p) => (
-                <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[p.id]} />
+                <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[`${activeChatId}:${p.id}`]} />
               ))}
             </div>
           </div>
