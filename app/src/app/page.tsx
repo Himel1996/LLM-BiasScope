@@ -1329,6 +1329,11 @@ export default function Page() {
         {/* Top bar */}
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 backdrop-blur-md">
           <div className="flex items-center gap-3">
+            <img
+              src="/favicon.ico"
+              alt="BiasScope Logo"
+              className="h-[1.4em] w-[1.4em] object-contain align-middle"
+            />
             <h1>LLM Bias Scope</h1>
             <span className="badge hidden md:inline">Compare model biases side-by-side</span>
           </div>
