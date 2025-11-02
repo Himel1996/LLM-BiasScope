@@ -7,12 +7,24 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Ba
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
-// ===== Models to compare side-by-side =====
-type Panel = { id: string; name: string; endpoint: string; dot: string };
-const PANELS: Panel[] = [
-  { id: 'openai-gpt-5',  name: 'OpenAI — GPT-5',            endpoint: '/api/chat?model=openai/gpt-5',           dot: 'bg-cyan-400' },
-  { id: 'claude-3-5',    name: 'Anthropic — Claude 3.5',    endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
+// ===== Available Models =====
+type ModelOption = { id: string; name: string; endpoint: string; dot: string };
+
+const AVAILABLE_MODELS: ModelOption[] = [
+  { id: 'openai/gpt-5', name: 'OpenAI — GPT-5', endpoint: '/api/chat?model=openai/gpt-5', dot: 'bg-cyan-400' },
+  { id: 'google/gemini-2.5-flash-lite', name: 'Google — Gemini 2.5 Flash Lite', endpoint: '/api/chat?model=google/gemini-2.5-flash-lite', dot: 'bg-blue-400' },
+  { id: 'deepseek/deepseek-v3.1', name: 'DeepSeek — DeepSeek V3.1', endpoint: '/api/chat?model=deepseek/deepseek-v3.1', dot: 'bg-purple-400' },
+  { id: 'xai/grok-4', name: 'xAI — Grok-4', endpoint: '/api/chat?model=xai/grok-4', dot: 'bg-pink-400' },
+  { id: 'minimax/minimax-m2', name: 'MiniMax — MiniMax M2', endpoint: '/api/chat?model=minimax/minimax-m2', dot: 'bg-indigo-400' },
+  { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic — Claude 3.5 Sonnet', endpoint: '/api/chat?model=anthropic/claude-3.5-sonnet', dot: 'bg-violet-400' },
+  { id: 'mistral/ministral-3b', name: 'Mistral — Mixtral 3B', endpoint: '/api/chat?model=mistral/ministral-3b', dot: 'bg-orange-400' },
 ];
+
+const DEFAULT_MODELS = ['openai/gpt-5', 'google/gemini-2.5-flash-lite'];
+
+type Panel = { id: string; name: string; endpoint: string; dot: string };
+
+const MODEL_SELECTION_KEY = 'biascope_models_v1';
 
 type SentenceAnalysis = {
   sentence: string;
@@ -148,6 +160,9 @@ function ChatColumn({
   onFirstUserMessage,
   onBiasUpdate,
   onMessagesUpdate,
+  columnIndex,
+  onModelChange,
+  otherSelectedModel,
 }: {
   panel: Panel;
   chatId: string;
@@ -155,7 +170,12 @@ function ChatColumn({
   onFirstUserMessage: (text: string) => void;
   onBiasUpdate: (panelId: string, state: BiasColumnState) => void;
   onMessagesUpdate?: (panelId: string, messages: any[]) => void;
+  columnIndex: number;
+  onModelChange: (columnIndex: number, modelId: string) => void;
+  otherSelectedModel: string | null;
 }) {
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const modelSelectorRef = useRef<HTMLDivElement>(null);
   // give each column a stable id bound to chatId so history separates per chat
   const { messages, sendMessage, status, error, stop } = useChat({
     id: `${chatId}:${panel.id}`,
@@ -270,22 +290,92 @@ function ChatColumn({
     }
   };
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target as Node)) {
+        setShowModelSelector(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
     <section className="flex h-full min-w-[420px] max-w-[560px] flex-1 px-4 py-3">
       <div className="flex h-full w-full flex-col overflow-hidden rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
         {/* Column header */}
         <div className="flex items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-7 py-[18px]">
-          <div className="flex items-center gap-2.5">
-            <span className={`h-2.5 w-2.5 rounded-full ${panel.dot}`} />
-            <div className="text-[14px] font-semibold tracking-wide text-[var(--textPrimary)] opacity-90">
-              {panel.name}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <span className={`h-2.5 w-2.5 rounded-full ${panel.dot} shrink-0`} />
+            <div className="relative flex-1 min-w-0" ref={modelSelectorRef}>
+              <button
+                onClick={() => setShowModelSelector(!showModelSelector)}
+                className="flex items-center gap-2 text-[14px] font-semibold tracking-wide text-white border-none rounded-lg px-3 py-1.5 transition-all truncate"
+                style={{
+                  background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
+                  boxShadow: '0 14px 30px rgba(107, 114, 255, 0.45)',
+                }}
+                title={`Change model (currently ${panel.name})`}
+              >
+                <span className="truncate">{panel.name}</span>
+                <span className="text-xs opacity-80 shrink-0">▼</span>
+              </button>
+              {showModelSelector && (
+                <div className="absolute top-full left-0 mt-1 w-56 rounded-lg border border-[var(--panelHairline)] bg-[var(--panel)] shadow-lg z-50 p-2">
+                  <div className="mb-2 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider">
+                    Select Model
+                  </div>
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {AVAILABLE_MODELS.map((model) => {
+                      // Match model ID with panel ID (panel.id has / replaced with -)
+                      const normalizedPanelId = panel.id.replace(/-/g, '/').replace(/\./g, '/');
+                      const isCurrentModel = model.id === normalizedPanelId || model.id.replace(/[\/\.]/g, '-') === panel.id;
+                      const isOtherColumn = model.id === otherSelectedModel;
+                      const canSelect = isCurrentModel || !isOtherColumn;
+                      
+                      return (
+                        <button
+                          key={model.id}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+                            isCurrentModel
+                              ? 'text-white border-none'
+                              : isOtherColumn
+                              ? 'opacity-50 cursor-not-allowed text-[var(--muted)]'
+                              : 'hover:bg-[var(--panelHairline)]/50 text-[var(--textPrimary)]'
+                          }`}
+                          style={
+                            isCurrentModel
+                              ? {
+                                  background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
+                                  boxShadow: '0 14px 30px rgba(107, 114, 255, 0.45)',
+                                }
+                              : undefined
+                          }
+                          onClick={() => {
+                            if (!canSelect) return;
+                            if (!isCurrentModel) {
+                              onModelChange(columnIndex, model.id);
+                              setShowModelSelector(false);
+                            }
+                          }}
+                          disabled={!canSelect}
+                        >
+                          <span className={`h-2.5 w-2.5 rounded-full ${model.dot} shrink-0`} />
+                          <span className="truncate">{model.name}</span>
+                          {isCurrentModel && <span className="ml-auto text-xs shrink-0">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-            <span className="badge">Streaming: {status === 'streaming' ? 'yes' : 'no'}</span>
+            <span className="badge shrink-0">Streaming: {status === 'streaming' ? 'yes' : 'no'}</span>
           </div>
           <button
             onClick={() => stop()}
             disabled={status !== 'streaming'}
-            className="btn h-[44px] px-5"
+            className="btn h-[44px] px-5 shrink-0"
           >
             Stop
           </button>
@@ -553,9 +643,58 @@ function BiasSummaryCard({
   );
 }
 
+// ===== Model Selection Hook =====
+function useModelSelection() {
+  const [selectedModels, setSelectedModels] = useState<[string, string]>([...DEFAULT_MODELS] as [string, string]);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const loadModels = (): [string, string] => {
+      try {
+        const stored = localStorage.getItem(MODEL_SELECTION_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length === 2) {
+            // Validate models exist
+            const valid = parsed.filter(m => AVAILABLE_MODELS.some(am => am.id === m));
+            if (valid.length === 2) return valid as [string, string];
+          }
+        }
+      } catch {
+        /* ignore malformed data */
+      }
+      return [...DEFAULT_MODELS] as [string, string];
+    };
+
+    const models = loadModels();
+    setSelectedModels(models);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(MODEL_SELECTION_KEY, JSON.stringify(selectedModels));
+  }, [selectedModels, hydrated]);
+
+  const setModel = useCallback((columnIndex: 0 | 1, modelId: string) => {
+    if (AVAILABLE_MODELS.some(am => am.id === modelId)) {
+      setSelectedModels((prev) => {
+        const newModels: [string, string] = [...prev];
+        newModels[columnIndex] = modelId;
+        return newModels;
+      });
+    }
+  }, []);
+
+  return { selectedModels, setModel, hydrated };
+}
+
 // ===== Main page =====
 export default function Page() {
-  const { chats, addChat, renameChat, removeChat, hydrated } = useChatHistory();
+  const { chats, addChat, renameChat, removeChat, hydrated: chatsHydrated } = useChatHistory();
+  const { selectedModels, setModel, hydrated: modelsHydrated } = useModelSelection();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeChatId, setActiveChatId] = useState<string>('');
   const [prompt, setPrompt] = useState('');
@@ -564,6 +703,23 @@ export default function Page() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // Create panels from selected models
+  const panels = useMemo<Panel[]>(() => {
+    return selectedModels
+      .map((modelId) => AVAILABLE_MODELS.find((m) => m.id === modelId))
+      .filter((m): m is ModelOption => m !== undefined)
+      .map((model) => ({
+        id: model.id.replace(/[\/\.]/g, '-'),
+        name: model.name,
+        endpoint: model.endpoint,
+        dot: model.dot,
+      }));
+  }, [selectedModels]);
+
+  const handleModelChange = useCallback((columnIndex: number, modelId: string) => {
+    setModel(columnIndex as 0 | 1, modelId);
+  }, [setModel]);
 
   const handleBiasUpdate = useCallback((panelId: string, state: BiasColumnState) => {
     setBiasSummaries((prev) => ({ ...prev, [panelId]: state }));
@@ -574,20 +730,20 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (!hydrated || chats.length === 0) return;
+    if (!chatsHydrated || chats.length === 0) return;
     if (!activeChatId || !chats.some((c) => c.id === activeChatId)) {
       setActiveChatId(chats[0].id);
     }
-  }, [hydrated, chats, activeChatId]);
+  }, [chatsHydrated, chats, activeChatId]);
 
   useEffect(() => {
     const el = composerRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 360)}px`;
-  }, [prompt, hydrated]);
+  }, [prompt, chatsHydrated]);
 
-  const canUseChat = hydrated && !!activeChatId;
+  const canUseChat = chatsHydrated && modelsHydrated && !!activeChatId && panels.length === 2;
 
   // update title on first message
   const handleFirstUserMessage = (text: string) => {
@@ -608,7 +764,7 @@ export default function Page() {
     const exportData = {
       chat: activeChat,
       exportedAt: new Date().toISOString(),
-      models: PANELS.map((panel) => {
+      models: panels.map((panel) => {
         const messages = allMessages[panel.id] || [];
         const biasAnalysis = biasSummaries[panel.id];
         
@@ -672,7 +828,7 @@ export default function Page() {
       yPosition += 15;
       
       // For each model
-      for (const panel of PANELS) {
+      for (const panel of panels) {
         if (yPosition > pageHeight - 40) {
           pdf.addPage();
           yPosition = 20;
@@ -808,9 +964,9 @@ export default function Page() {
 
           <button
             className="btn primary w-full mb-3"
-            onClick={() => { if (!hydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }}
+            onClick={() => { if (!chatsHydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }}
             title="+ New chat"
-            disabled={!hydrated}
+            disabled={!chatsHydrated}
           >
             ＋ New chat
           </button>
@@ -906,7 +1062,7 @@ export default function Page() {
                 </div>
               )}
             </div>
-            <button className="btn" onClick={() => { if (!hydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }} disabled={!hydrated}>
+            <button className="btn" onClick={() => { if (!chatsHydrated) return; const { id } = addChat(); setActiveChatId(id); setPrompt(''); }} disabled={!chatsHydrated}>
               ＋ New
             </button>
           </div>
@@ -917,8 +1073,8 @@ export default function Page() {
           {/* Two fixed columns; scroll horizontally on narrow viewports */}
           <div className="flex overflow-x-auto px-8 py-12">
             <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center gap-14">
-              {hydrated && activeChatId ? (
-                PANELS.map((p) => (
+              {chatsHydrated && modelsHydrated && activeChatId && panels.length === 2 ? (
+                panels.map((p, idx) => (
                   <ChatColumn
                   key={p.id}
                   panel={p}
@@ -927,6 +1083,9 @@ export default function Page() {
                   onFirstUserMessage={handleFirstUserMessage}
                   onBiasUpdate={handleBiasUpdate}
                   onMessagesUpdate={handleMessagesUpdate}
+                  columnIndex={idx}
+                  onModelChange={handleModelChange}
+                  otherSelectedModel={idx === 0 ? selectedModels[1] : selectedModels[0]}
                 />
                 ))
               ) : (
@@ -940,7 +1099,7 @@ export default function Page() {
         {/* Bias summaries */}
         <div className="px-8 pb-12 pt-8">
           <div className="mx-auto flex w-full max-w-[1300px] flex-wrap items-stretch justify-center gap-14">
-              {PANELS.map((p) => (
+              {panels.map((p) => (
                 <BiasSummaryCard key={`${p.id}-bias`} panel={p} analysis={biasSummaries[p.id]} />
               ))}
             </div>
