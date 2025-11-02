@@ -24,7 +24,7 @@ const AVAILABLE_MODELS: ModelOption[] = [
 
 ];
 
-const DEFAULT_MODELS = ['openai/gpt-5', 'google/gemini-2.5-flash-lite'];
+const DEFAULT_MODELS = ['minimax/minimax-m2', 'meituan/longcat-flash-chat'];
 
 type Panel = { id: string; name: string; endpoint: string; dot: string };
 
