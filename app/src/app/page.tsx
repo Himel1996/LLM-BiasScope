@@ -12,7 +12,7 @@ import remarkGfm from 'remark-gfm';
 
 // ===== Available Models =====
 type ModelOption = { id: string; name: string; endpoint: string; dot: string };
-
+// addition of models to be added here  
 const AVAILABLE_MODELS: ModelOption[] = [
   //{ id: 'openai/gpt-5', name: 'OpenAI — GPT-5', endpoint: '/api/chat?model=openai/gpt-5', dot: 'bg-cyan-400' },
   { id: 'google/gemini-2.5-flash-lite', name: 'Google — Gemini 2.5 Flash Lite', endpoint: '/api/chat?model=google/gemini-2.5-flash-lite', dot: 'bg-blue-400' },
