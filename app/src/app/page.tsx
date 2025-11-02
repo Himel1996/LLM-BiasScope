@@ -10,6 +10,32 @@ import html2canvas from 'html2canvas';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+// addition of contact us button
+const [contactOpen, setContactOpen] = useState(false);
+const contactRef = useRef<HTMLDivElement>(null);
+useEffect(() => {
+  if (!contactOpen) return;
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContactOpen(false); };
+  const onClickOutside = (e: MouseEvent) => {
+    if (contactRef.current && !contactRef.current.contains(e.target as Node)) {
+      setContactOpen(false);
+    }
+  };
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('mousedown', onClickOutside);
+  return () => {
+    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('mousedown', onClickOutside);
+  };
+}, [contactOpen]);
+
+const CONTACTS = [
+  { name: 'Himel Ghosh', linkedin: 'https://www.linkedin.com/in/himel-ghosh-954056162/' },
+  { name: 'Nick Werner', linkedin: 'https://www.linkedin.com/in/nick-werner-45b225227/' },
+];
+
+
+
 // ===== Available Models =====
 type ModelOption = { id: string; name: string; endpoint: string; dot: string };
 // addition of models to be added here  
@@ -1406,6 +1432,9 @@ export default function Page() {
             <span className="badge hidden md:inline">Compare model biases side-by-side</span>
           </div>
           <div className="flex items-center gap-2">
+            <button className="btn" onClick={() => setContactOpen(true)}>
+              Contact Us
+            </button>
             <a
               className="btn"
               href="https://docs.google.com/forms/d/e/1FAIpQLSd7YMQ-15J2oHZ4_Ihdsa4FJHb0JMANY5-JAP2Tt6EQn2N4Mg/viewform?usp=publish-editor"
@@ -1500,6 +1529,67 @@ export default function Page() {
               </div>
             </div>
           </div>
+
+          {/* contact us modal */}
+          {contactOpen && typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                aria-modal="true"
+                role="dialog"
+                aria-labelledby="contact-title"
+                className="fixed inset-0 z-[10000] flex items-center justify-center"
+              >
+                {/* Backdrop */}
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+                {/* Dialog */}
+                <div
+                  ref={contactRef}
+                  className="relative z-[10001] w-full max-w-md rounded-2xl border border-[var(--panelHairline)] bg-[var(--panel)] shadow-[0_18px_45px_rgba(5,10,25,0.35)]"
+                >
+                  <div className="flex items-center justify-between border-b border-[var(--panelHairline)] bg-[var(--panelHeader)] px-5 py-3 rounded-t-2xl">
+                    <h2 id="contact-title" className="text-sm font-semibold text-[var(--textPrimary)]">
+                      Contact us
+                    </h2>
+                    <button
+                      aria-label="Close"
+                      className="btn ghost h-9 px-3"
+                      onClick={() => setContactOpen(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="px-5 py-4">
+                    <ul className="space-y-3">
+                      {CONTACTS.map((c) => (
+                        <li key={c.name} className="flex items-start justify-between gap-3 rounded-lg border border-[var(--panelHairline)]/40 bg-white/5 px-4 py-3">
+                          <div>
+                            <div className="text-[var(--textPrimary)] font-medium">{c.name}</div>
+                            <a
+                              href={c.linkedin}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[13px] text-[var(--accent)] hover:underline break-all"
+                            >
+                              LinkedIn Profile
+                            </a>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-5 flex justify-end">
+                      <button className="btn primary h-10 px-4" onClick={() => setContactOpen(false)}>
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )
+          }
 
           {/* Composer (bottom, big and pretty) */}
           <footer className="border-t border-transparent px-8 pb-12 pt-6 shrink-0">
