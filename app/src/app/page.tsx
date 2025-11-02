@@ -1439,101 +1439,104 @@ export default function Page() {
         </header>
 
         {/* Scrollable content area */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {/* Two fixed columns; scroll horizontally on narrow viewports */}
-          <div className="flex overflow-x-auto px-8 py-12">
-            <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center" style={{ gap: '2rem' }}>
-              {chatsHydrated && modelsHydrated && activeChatId && panels.length === 2 ? (
-                panels.map((p, idx) => (
-                  <div key={`${activeChatId}-${p.id}-wrapper`} className="flex-1 relative" style={{ minWidth: '420px', maxWidth: '560px' }}>
-                    {idx > 0 && (
-                      <div 
-                        className="absolute left-0 top-0 bottom-0 w-px bg-[var(--panelHairline)]/50"
-                        style={{ left: '-1rem', zIndex: 1 }}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto">
+            {/* Two fixed columns; scroll horizontally on narrow viewports */}
+            <div className="flex overflow-x-auto px-8 py-12">
+              <div className="mx-auto flex w-full max-w-[1300px] flex-1 items-stretch justify-center" style={{ gap: '2rem' }}>
+                {chatsHydrated && modelsHydrated && activeChatId && panels.length === 2 ? (
+                  panels.map((p, idx) => (
+                    <div key={`${activeChatId}-${p.id}-wrapper`} className="flex-1 relative" style={{ minWidth: '420px', maxWidth: '560px' }}>
+                      {idx > 0 && (
+                        <div 
+                          className="absolute left-0 top-0 bottom-0 w-px bg-[var(--panelHairline)]/50"
+                          style={{ left: '-1rem', zIndex: 1 }}
+                        />
+                      )}
+                      <ChatColumn
+                        key={`${activeChatId}-${p.id}`}
+                        panel={p}
+                        chatId={activeChatId}
+                        sharedPrompt={prompt}
+                        onFirstUserMessage={handleFirstUserMessage}
+                        onBiasUpdate={handleBiasUpdate}
+                        onMessagesUpdate={handleMessagesUpdate}
+                        columnIndex={idx}
+                        onModelChange={handleModelChange}
+                        otherSelectedModel={idx === 0 ? selectedModels[1] : selectedModels[0]}
                       />
-                    )}
-                    <ChatColumn
-                      key={`${activeChatId}-${p.id}`}
-                      panel={p}
-                      chatId={activeChatId}
-                      sharedPrompt={prompt}
-                      onFirstUserMessage={handleFirstUserMessage}
-                      onBiasUpdate={handleBiasUpdate}
-                      onMessagesUpdate={handleMessagesUpdate}
-                      columnIndex={idx}
-                      onModelChange={handleModelChange}
-                      otherSelectedModel={idx === 0 ? selectedModels[1] : selectedModels[0]}
-                    />
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted)]">
+                    Preparing chats…
                   </div>
-                ))
-              ) : (
-                <div className="flex flex-1 items-center justify-center text-sm text-[var(--muted)]">
-                  Preparing chats…
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
 
-        {/* Bias summaries */}
-        <div className="px-8 pb-12 pt-12 border-t border-[var(--panelHairline)]/30">
-          <div className="mx-auto flex w-full max-w-[1300px] flex-col items-stretch justify-center" style={{ gap: '2rem' }}>
-            <div className="flex w-full flex-wrap items-stretch justify-center relative" style={{ gap: '2rem' }}>
-              {panels.map((p, idx) => (
-                <div key={`${p.id}-bias-wrapper`} className="flex-1 relative" style={{ minWidth: '400px', maxWidth: '600px' }}>
-                  {idx > 0 && (
-                    <div 
-                      className="absolute left-0 top-0 bottom-0 w-px bg-[var(--panelHairline)]/50"
-                      style={{ left: '-1rem', zIndex: 1 }}
-                    />
-                  )}
-                  <BiasSummaryCard panel={p} analysis={biasSummaries[`${activeChatId}:${p.id}`]} />
+            {/* Bias summaries */}
+            <div className="px-8 pb-12 pt-12 border-t border-[var(--panelHairline)]/30">
+              <div className="mx-auto flex w-full max-w-[1300px] flex-col items-stretch justify-center" style={{ gap: '2rem' }}>
+                <div className="flex w-full flex-wrap items-stretch justify-center relative" style={{ gap: '2rem' }}>
+                  {panels.map((p, idx) => (
+                    <div key={`${p.id}-bias-wrapper`} className="flex-1 relative" style={{ minWidth: '400px', maxWidth: '600px' }}>
+                      {idx > 0 && (
+                        <div 
+                          className="absolute left-0 top-0 bottom-0 w-px bg-[var(--panelHairline)]/50"
+                          style={{ left: '-1rem', zIndex: 1 }}
+                        />
+                      )}
+                      <BiasSummaryCard panel={p} analysis={biasSummaries[`${activeChatId}:${p.id}`]} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+                {/* Model Comparison Card */}
+                <ModelComparisonCard 
+                  panels={panels} 
+                  biasSummaries={biasSummaries}
+                  activeChatId={activeChatId}
+                />
+              </div>
             </div>
-            {/* Model Comparison Card */}
-            <ModelComparisonCard 
-              panels={panels} 
-              biasSummaries={biasSummaries}
-              activeChatId={activeChatId}
-            />
           </div>
-        </div>
 
           {/* Composer (bottom, big and pretty) */}
           <footer className="border-t border-transparent px-8 pb-12 pt-6 shrink-0">
-          <div className="mx-auto w-full max-w-[960px]">
-            <div className="flex flex-col overflow-hidden rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
-              <div className="px-7 pt-6 pb-2">
-                <textarea
-                  ref={composerRef}
-                  rows={1}
-                  className="composer-textarea"
-                  style={{ minHeight: '3.25rem', maxHeight: '22rem' }}
-                  placeholder="Send a message to all models…"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      sendAll();
-                    }
-                  }}
-                />
+            <div className="mx-auto w-full max-w-[960px]">
+              <div className="flex flex-col overflow-hidden rounded-[26px] border border-[var(--panelBorder)] bg-[var(--panel)] shadow-[0_26px_60px_rgba(5,10,25,0.35)] backdrop-blur-xl">
+                <div className="px-7 pt-6 pb-2">
+                  <textarea
+                    ref={composerRef}
+                    rows={1}
+                    className="composer-textarea"
+                    style={{ minHeight: '3.25rem', maxHeight: '22rem' }}
+                    placeholder="Send a message to all models…"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendAll();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 py-3">
+                  <div className="text-xs text-[var(--muted)]">Shift+Enter for newline</div>
+                  <button onClick={sendAll} className="btn primary h-12 px-6" disabled={!canUseChat}>
+                    Send to all
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t border-[var(--panelHairline)] bg-[var(--panelHeader)] px-6 py-3">
-                <div className="text-xs text-[var(--muted)]">Shift+Enter for newline</div>
-                <button onClick={sendAll} className="btn primary h-12 px-6" disabled={!canUseChat}>
-                  Send to all
-                </button>
+              <div className="mt-2 text-center text-[11px] text-[var(--muted)]">
+                Reasoning may be incorrect. Compare tone and citations across models.
               </div>
             </div>
-            <div className="mt-2 text-center text-[11px] text-[var(--muted)]">
-              Reasoning may be incorrect. Compare tone and citations across models.
-            </div>
-          </div>
           </footer>
         </div>
+        </div>
       </div>
-    </div>
+    
   );
 }
